@@ -194,11 +194,6 @@ local function game_panel()
                 print('click blocked')
             elseif tox >= WorldWidth * 50 or toy >= WorldHeight * 50 then
                 print("outside map")
-            elseif t[2] == "right" then
-                if selected then
-                    selected = nil
-                    hint = nil
-                end
             elseif selected then
                 local fromx, fromy = table.unpack(selected)
                 selected = nil
@@ -211,19 +206,24 @@ local function game_panel()
                     hint = "超出移动距离"
                 elseif mapData[fromx][fromy].party and mapData[tox][toy].party then
                     if mapData[fromx][fromy].party == mapData[tox][toy].party then
-                        coroutine.yield(table.pack("merge", fromx, fromy, tox, toy))
+                        if t[2] == "left" then
+                            coroutine.yield(table.pack("merge", fromx, fromy, tox, toy))
+                        elseif t[2] == "right" then
+                            coroutine.yield(table.pack("halfmerge", fromx, fromy, tox, toy))
+                        end
                     else
-                        coroutine.yield(table.pack("attack", fromx, fromy, tox, toy))
+                        if t[2] == "left" then
+                            coroutine.yield(table.pack("attack", fromx, fromy, tox, toy))
+                        elseif t[2] == "right" then
+                            coroutine.yield(table.pack("halfattack", fromx, fromy, tox, toy))
+                        end
                     end
                 else
-                    -- mapData[tox][toy] = {
-                    --     party = mapData[fromx][fromy].party,
-                    --     color = mapData[fromx][fromy].color,
-                    --     number = mapData[fromx][fromy].number
-                    -- }
-                    -- mapData[fromx][fromy] = {}
-
-                    coroutine.yield(table.pack("move", fromx, fromy, tox, toy))
+                    if t[2] == "left" then
+                        coroutine.yield(table.pack("move", fromx, fromy, tox, toy))
+                    elseif t[2] == "right" then
+                        coroutine.yield(table.pack("halfmove", fromx, fromy, tox, toy))
+                    end
                 end
             else
                 tox = tox // 50 + 1
@@ -295,23 +295,44 @@ local function server_game_main(client)
             if op then
                 clickBlocked = true
 
-                if op == "move" then
-                    mapData[tox][toy] = {
-                        party = mapData[fromx][fromy].party,
-                        color = mapData[fromx][fromy].color,
-                        number = mapData[fromx][fromy].number
-                    }
-                    mapData[fromx][fromy] = {}
-                    hint = ""
-                    client:send(string.format("setmap %d %d\n", fromx, fromy))
-                    client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
-                elseif op == "merge" then
-                    mapData[tox][toy].number = mapData[tox][toy].number + mapData[fromx][fromy].number
-                    mapData[fromx][fromy] = {}
-                    hint = ""
-                    client:send(string.format("setmap %d %d\n", fromx, fromy))
-                    client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
-                elseif op == "attack" then
+                if op == "move" or op == "halfmove" then
+                    if op == "move" or mapData[fromx][fromy].number < 2 then
+                        mapData[tox][toy] = {
+                            party = mapData[fromx][fromy].party,
+                            color = mapData[fromx][fromy].color,
+                            number = mapData[fromx][fromy].number
+                        }
+                        mapData[fromx][fromy] = {}
+                        hint = ""
+                        client:send(string.format("setmap %d %d\n", fromx, fromy))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                    else
+                        local tomove = math.floor(mapData[fromx][fromy].number / 2)
+                        mapData[tox][toy] = {
+                            party = mapData[fromx][fromy].party,
+                            color = mapData[fromx][fromy].color,
+                            number = tomove
+                        }
+                        mapData[fromx][fromy].number = mapData[fromx][fromy].number - tomove
+                        client:send(string.format("setmap %d %d %d %d\n", fromx, fromy, mapData[fromx][fromy].party, mapData[fromx][fromy].number))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                        hint = ""
+                    end
+                elseif op == "merge" or op == "halfmerge" then
+                    if op == "merge" or mapData[fromx][fromy].number < 2 then
+                        mapData[tox][toy].number = mapData[tox][toy].number + mapData[fromx][fromy].number
+                        mapData[fromx][fromy] = {}
+                        hint = ""
+                        client:send(string.format("setmap %d %d\n", fromx, fromy))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                    else
+                        local tomove = math.floor(mapData[fromx][fromy].number / 2)
+                        mapData[tox][toy].number = mapData[tox][toy].number + tomove
+                        mapData[fromx][fromy].number = mapData[fromx][fromy].number - tomove
+                        client:send(string.format("setmap %d %d %d %d\n", fromx, fromy, mapData[fromx][fromy].party, mapData[fromx][fromy].number))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                    end
+                elseif op == "attack" or op == "halfattack" then
                     local atkbuf, defbuf
                     local same, diff = getSurround(fromx, fromy, mapData[fromx][fromy].party)
                     if diff >= 3 then
@@ -476,7 +497,7 @@ local function client_main()
 
     print("Connecting to server...")
     local client = TCPSocket()
-    client:connect("127.0.0.1", 10111)
+    client:connect("106.53.10.163", 59632)
 
     for i=1, WorldWidth do
         mapData[i] = {}
@@ -551,23 +572,44 @@ local function client_main()
             if op then
                 clickBlocked = true
 
-                if op == "move" then
-                    mapData[tox][toy] = {
-                        party = mapData[fromx][fromy].party,
-                        color = mapData[fromx][fromy].color,
-                        number = mapData[fromx][fromy].number
-                    }
-                    mapData[fromx][fromy] = {}
-                    hint = ""
-                    client:send(string.format("setmap %d %d\n", fromx, fromy))
-                    client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
-                elseif op == "merge" then
-                    mapData[tox][toy].number = mapData[tox][toy].number + mapData[fromx][fromy].number
-                    mapData[fromx][fromy] = {}
-                    hint = ""
-                    client:send(string.format("setmap %d %d\n", fromx, fromy))
-                    client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
-                elseif op == "attack" then
+                if op == "move" or op == "halfmove" then
+                    if op == "move" or mapData[fromx][fromy].number < 2 then
+                        mapData[tox][toy] = {
+                            party = mapData[fromx][fromy].party,
+                            color = mapData[fromx][fromy].color,
+                            number = mapData[fromx][fromy].number
+                        }
+                        mapData[fromx][fromy] = {}
+                        hint = ""
+                        client:send(string.format("setmap %d %d\n", fromx, fromy))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                    else
+                        local tomove = math.floor(mapData[fromx][fromy].number / 2)
+                        mapData[tox][toy] = {
+                            party = mapData[fromx][fromy].party,
+                            color = mapData[fromx][fromy].color,
+                            number = tomove
+                        }
+                        mapData[fromx][fromy].number = mapData[fromx][fromy].number - tomove
+                        client:send(string.format("setmap %d %d %d %d\n", fromx, fromy, mapData[fromx][fromy].party, mapData[fromx][fromy].number))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                        hint = ""
+                    end
+                elseif op == "merge" or op == "halfmerge" then
+                    if op == "merge" or mapData[fromx][fromy].number < 2 then
+                        mapData[tox][toy].number = mapData[tox][toy].number + mapData[fromx][fromy].number
+                        mapData[fromx][fromy] = {}
+                        hint = ""
+                        client:send(string.format("setmap %d %d\n", fromx, fromy))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                    else
+                        local tomove = math.floor(mapData[fromx][fromy].number / 2)
+                        mapData[tox][toy].number = mapData[tox][toy].number + tomove
+                        mapData[fromx][fromy].number = mapData[fromx][fromy].number - tomove
+                        client:send(string.format("setmap %d %d %d %d\n", fromx, fromy, mapData[fromx][fromy].party, mapData[fromx][fromy].number))
+                        client:send(string.format("setmap %d %d %d %d\n", tox, toy, mapData[tox][toy].party, mapData[tox][toy].number))
+                    end
+                elseif op == "attack" or op == "halfattack" then
                     local atkbuf, defbuf
                     local same, diff = getSurround(fromx, fromy, mapData[fromx][fromy].party)
                     if diff >= 3 then
